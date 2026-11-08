@@ -7,7 +7,7 @@ import streamlit as st
 import plotly.express as px
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "o2c_database.db"
+DB_PATH = BASE_DIR / "o2c_test_v2.db"
 
 st.set_page_config(
     page_title="O2C Revenue Intelligence",

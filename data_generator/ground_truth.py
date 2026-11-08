@@ -16,13 +16,13 @@ def generate_ground_truth():
         },
         {
             "entity_type": "Payment",
-            "entity_id": "PAY-2026-000002",
+            "entity_id": "PAY-2026-000001",
             "anomaly_type": "DUPLICATE_ALLOCATION",
             "description": "Same payment is allocated to the same invoice more than once"
         },
         {
             "entity_type": "Invoice",
-            "entity_id": "INV-2026-000003",
+            "entity_id": "INV-2026-001267",
             "anomaly_type": "UNPAID_CLOSED_ORDER",
             "description": "Completed order has an invoice with outstanding balance"
         },
@@ -34,7 +34,7 @@ def generate_ground_truth():
         },
         {
             "entity_type": "Dispute",
-            "entity_id": "DSP-2026-000004",
+            "entity_id": "DSP-2026-000001",
             "anomaly_type": "MISSING_DISPUTE_RECONCILIATION",
             "description": "Active dispute is missing from the receivables report"
         }

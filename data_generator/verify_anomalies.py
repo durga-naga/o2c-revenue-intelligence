@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "o2c_database.db"
+DB_PATH = BASE_DIR / "o2c_test_v2.db"
 
 
 def verify_anomalies():
@@ -13,25 +13,22 @@ def verify_anomalies():
 
     print("\n===== ANOMALY VERIFICATION =====")
 
-    # 1. Overbilling
+        # 1. Overbilling
     cursor.execute("""
         SELECT
-            il.invoice_id,
-            il.quantity,
-            COALESCE(SUM(sl.shipped_quantity), 0) AS fulfilled_quantity
+            il.order_line_id,
+            SUM(il.quantity) AS invoiced_quantity,
+            (
+                SELECT COALESCE(SUM(sl.shipped_quantity), 0)
+                FROM shipment_lines sl
+                JOIN shipments sh
+                    ON sh.shipment_id = sl.shipment_id
+                WHERE sl.order_line_id = il.order_line_id
+                  AND sh.shipment_status = 'Delivered'
+            ) AS fulfilled_quantity
         FROM invoice_lines il
-        JOIN shipments sh
-            ON sh.order_id = (
-                SELECT order_id
-                FROM order_lines
-                WHERE order_line_id = il.order_line_id
-            )
-            AND sh.shipment_status = 'Delivered'
-        JOIN shipment_lines sl
-            ON sl.shipment_id = sh.shipment_id
-            AND sl.order_line_id = il.order_line_id
-        GROUP BY il.invoice_line_id
-        HAVING il.quantity > fulfilled_quantity
+        GROUP BY il.order_line_id
+        HAVING invoiced_quantity > fulfilled_quantity
     """)
     print("\n1. Overbilling:", cursor.fetchall())
 
@@ -57,7 +54,7 @@ def verify_anomalies():
         LEFT JOIN payment_allocations pa
             ON pa.invoice_id = i.invoice_id
         WHERE s.order_status = 'Completed'
-  AND i.invoice_id = 'INV-2026-000003'
+  AND i.invoice_id = 'INV-2026-001267'
         GROUP BY i.invoice_id
         HAVING outstanding_balance > 0
         ORDER BY i.invoice_id
@@ -90,7 +87,7 @@ def verify_anomalies():
     cursor.execute("""
         SELECT invoice_id, disputed_amount
         FROM disputes
-        WHERE dispute_id = 'DSP-2026-000004'
+        WHERE dispute_id = 'DSP-2026-000001'
     """)
 
     dispute = cursor.fetchone()
@@ -100,7 +97,7 @@ def verify_anomalies():
         reported_amount = reported_disputes.get(invoice_id, 0)
 
         print("\n5. Missing dispute reconciliation:")
-        print("Dispute ID: DSP-2026-000004")
+        print("Dispute ID: DSP-2026-000001")
         print("Expected amount:", expected_amount)
         print("Reported amount:", reported_amount)
         print("Anomaly detected:", reported_amount < expected_amount)

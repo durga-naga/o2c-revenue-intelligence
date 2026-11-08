@@ -1,6 +1,6 @@
 entity_type,entity_id,anomaly_type,description
 Invoice,INV-2026-000001,OVERBILLING,Invoice quantity exceeds delivered quantity
-Payment,PAY-2026-000002,DUPLICATE_ALLOCATION,Same payment is allocated to the same invoice more than once
-Invoice,INV-2026-000003,UNPAID_CLOSED_ORDER,Completed order has an invoice with outstanding balance
+Payment,PAY-2026-000001,DUPLICATE_ALLOCATION,Same payment is allocated to the same invoice more than once
+Invoice,INV-2026-001267,UNPAID_CLOSED_ORDER,Completed order has an invoice with outstanding balance
 SalesOrder,SO-2026-000001,INVALID_LIFECYCLE,Order status transition skips required intermediate states
-Dispute,DSP-2026-000004,MISSING_DISPUTE_RECONCILIATION,Active dispute is missing from the receivables report
+Dispute,DSP-2026-000001,MISSING_DISPUTE_RECONCILIATION,Active dispute is missing from the receivables report

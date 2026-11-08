@@ -12,7 +12,7 @@ from master_data import (
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "o2c_database.db"
+DB_PATH = BASE_DIR / "o2c_test_v2.db"
 
 
 def generate_accounts(count=500):
@@ -244,7 +244,10 @@ def generate_sales_orders():
     print(f"Accepted quotes found: {len(accepted_quotes)}")
 
 
+
+
 def generate_shipments():
+
     rng = random.Random(RANDOM_SEED)
 
     connection = sqlite3.connect(DB_PATH)
@@ -252,151 +255,162 @@ def generate_shipments():
     cursor = connection.cursor()
 
     cursor.execute("""
-        SELECT order_id, order_date
-        FROM sales_orders
-        WHERE order_status IN ('Shipped', 'Completed')
+        SELECT s.order_id, s.order_date,
+               ol.order_line_id, ol.quantity
+        FROM sales_orders s
+        JOIN order_lines ol ON s.order_id = ol.order_id
+        WHERE s.order_status IN ('Shipped', 'Completed')
+        ORDER BY s.order_id, ol.order_line_id
     """)
 
-    shipped_orders = cursor.fetchall()
+    order_records = cursor.fetchall()
+
+    # Expand order quantities into individual units
+    units = []
+
+    for order_id, order_date, order_line_id, quantity in order_records:
+        for _ in range(quantity):
+            units.append((order_id, order_date, order_line_id))
+
+    print(f"Eligible order units: {len(units)}")
+
+    target_delivered = 8000
+
+    if len(units) < target_delivered:
+        connection.close()
+        raise ValueError(
+            f"Not enough eligible units for 8000 invoices. "
+            f"Available units: {len(units)}"
+        )
+
+    rng.shuffle(units)
+
+    # Exactly 8000 delivered shipments.
+    # Additional units become non-delivered shipments.
+    extra_units = min(1000, len(units) - target_delivered)
+
+    selected_units = units[:target_delivered + extra_units]
+
     shipments = []
     shipment_lines = []
 
-    for i, order in enumerate(shipped_orders, start=1):
+    for index, (order_id, order_date, order_line_id) in enumerate(
+        selected_units, start=1
+    ):
 
-        order_id, order_date = order
+        shipment_id = f"SHP-2026-{index:06d}"
+        shipment_date = (
+            date.fromisoformat(order_date)
+            + timedelta(days=rng.randint(2, 12))
+        )
 
-        shipment_id = f"SHP-2026-{i:06d}"
-
-        shipment_date = date.fromisoformat(order_date) + timedelta(days=2)
-        delivery_date = shipment_date + timedelta(days=3)
-
-        shipment_status = rng.choice([
-            "Shipped",
-            "In Transit",
-            "Delivered"
-        ])
-
-        tracking_number = f"TRK-2026-{i:06d}"
+        if index <= target_delivered:
+            shipment_status = "Delivered"
+            delivery_date = (
+                shipment_date + timedelta(days=3)
+            ).isoformat()
+        else:
+            shipment_status = rng.choice(["Shipped", "In Transit"])
+            delivery_date = None
 
         shipments.append((
             shipment_id,
             order_id,
             shipment_date.isoformat(),
-            delivery_date.isoformat(),
+            delivery_date,
             shipment_status,
-            tracking_number
+            f"TRK-2026-{index:06d}"
         ))
-        cursor.execute("""
-            SELECT order_line_id, quantity
-            FROM order_lines
-            WHERE order_id = ?
-        """, (order_id,))
 
-        order_items = cursor.fetchall()
-
-        for j, item in enumerate(order_items, start=1):
-
-            order_line_id, quantity = item
-
-            shipment_line_id = f"SLN-2026-{i:06d}-{j:02d}"
-
-            shipment_lines.append((
-                shipment_line_id,
-                shipment_id,
-                order_line_id,
-                quantity
-            ))
+        shipment_lines.append((
+            f"SLN-2026-{index:06d}",
+            shipment_id,
+            order_line_id,
+            1
+        ))
 
     cursor.executemany("""
-        INSERT OR IGNORE INTO shipments
-        (shipment_id, order_id, shipment_date, delivery_date,
-         shipment_status, tracking_number)
+        INSERT INTO shipments (
+            shipment_id, order_id, shipment_date,
+            delivery_date, shipment_status, tracking_number
+        )
         VALUES (?, ?, ?, ?, ?, ?)
     """, shipments)
 
-    connection.commit()
-
     cursor.executemany("""
-        INSERT OR IGNORE INTO shipment_lines
-        (shipment_line_id, shipment_id, order_line_id, shipped_quantity)
+        INSERT INTO shipment_lines (
+            shipment_line_id, shipment_id,
+            order_line_id, shipped_quantity
+        )
         VALUES (?, ?, ?, ?)
     """, shipment_lines)
 
     connection.commit()
 
-    cursor.execute("SELECT COUNT(*) FROM shipments")
-    shipment_total = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM shipment_lines")
-    line_total = cursor.fetchone()[0]
+    print(f"Total shipments generated: {len(shipments)}")
+    print(f"Delivered shipments: {target_delivered}")
+    print(f"Non-delivered shipments: {extra_units}")
 
     connection.close()
 
-    print(f"Total shipments generated: {shipment_total}")
-    print(f"Total shipment lines generated: {line_total}")
-    print(f"Shipped or completed orders found: {len(shipped_orders)}")
-
 
 def generate_invoices():
-    rng = random.Random(RANDOM_SEED)
-
     connection = sqlite3.connect(DB_PATH)
     connection.execute("PRAGMA foreign_keys = ON")
     cursor = connection.cursor()
 
     cursor.execute("""
-        SELECT s.order_id, s.account_id, s.order_date, s.total_amount
-        FROM sales_orders s
-        JOIN shipments sh ON s.order_id = sh.order_id
+        SELECT
+            sh.order_id,
+            s.account_id,
+            sh.shipment_id,
+            sh.delivery_date
+        FROM shipments sh
+        JOIN sales_orders s ON s.order_id = sh.order_id
         WHERE sh.shipment_status = 'Delivered'
+        ORDER BY sh.shipment_id
     """)
 
-    delivered_orders = cursor.fetchall()
-
-    print(f"Delivered orders found for invoicing: {len(delivered_orders)}")
+    delivered_shipments = cursor.fetchall()
 
     invoices = []
     invoice_lines = []
+    invoice_number = 1
+    line_number = 1
 
-    for i, order in enumerate(delivered_orders, start=1):
+    for order_id, account_id, shipment_id, delivery_date in delivered_shipments:
 
-        order_id, account_id, order_date, total_amount = order
+        cursor.execute("""
+            SELECT
+                sl.order_line_id,
+                sl.shipped_quantity,
+                ol.unit_price
+            FROM shipment_lines sl
+            JOIN order_lines ol
+                ON ol.order_line_id = sl.order_line_id
+            WHERE sl.shipment_id = ?
+        """, (shipment_id,))
 
-        invoice_id = f"INV-2026-{i:06d}"
+        shipment_items = cursor.fetchall()
 
-        invoice_date = date.fromisoformat(order_date) + timedelta(days=5)
+        if not shipment_items:
+            continue
+
+        invoice_id = f"INV-2026-{invoice_number:06d}"
+
+        invoice_date = date.fromisoformat(delivery_date)
         due_date = invoice_date + timedelta(days=30)
 
-        invoice_status = "Issued"
+        invoice_total = 0
+        current_lines = []
 
-        invoices.append((
-            invoice_id,
-            order_id,
-            account_id,
-            invoice_date.isoformat(),
-            due_date.isoformat(),
-            invoice_status,
-            total_amount,
-            "INR"
-        ))
-        cursor.execute("""
-            SELECT order_line_id, quantity, unit_price
-            FROM order_lines
-            WHERE order_id = ?
-        """, (order_id,))
-
-        order_items = cursor.fetchall()
-
-        for j, item in enumerate(order_items, start=1):
-
-            order_line_id, quantity, unit_price = item
-
-            invoice_line_id = f"ILN-2026-{i:06d}-{j:02d}"
+        for order_line_id, quantity, unit_price in shipment_items:
 
             line_amount = round(quantity * unit_price, 2)
+            invoice_total += line_amount
 
-            invoice_lines.append((
-                invoice_line_id,
+            current_lines.append((
+                f"ILN-2026-{line_number:06d}",
                 invoice_id,
                 order_line_id,
                 quantity,
@@ -404,33 +418,48 @@ def generate_invoices():
                 line_amount
             ))
 
+            line_number += 1
+
+        invoices.append((
+            invoice_id,
+            order_id,
+            account_id,
+            invoice_date.isoformat(),
+            due_date.isoformat(),
+            "Issued",
+            round(invoice_total, 2),
+            "INR"
+        ))
+
+        invoice_lines.extend(current_lines)
+        invoice_number += 1
+
     cursor.executemany("""
-        INSERT OR IGNORE INTO invoices
-        (invoice_id, order_id, account_id, invoice_date, due_date,
-         invoice_status, total_amount, currency)
+        INSERT INTO invoices (
+            invoice_id, order_id, account_id,
+            invoice_date, due_date, invoice_status,
+            total_amount, currency
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, invoices)
 
-    connection.commit()
-
     cursor.executemany("""
-        INSERT OR IGNORE INTO invoice_lines
-        (invoice_line_id, invoice_id, order_line_id,
-         quantity, unit_price, line_amount)
+        INSERT INTO invoice_lines (
+            invoice_line_id, invoice_id, order_line_id,
+            quantity, unit_price, line_amount
+        )
         VALUES (?, ?, ?, ?, ?, ?)
     """, invoice_lines)
 
     connection.commit()
-    cursor.execute("SELECT COUNT(*) FROM invoices")
-    invoice_total = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM invoice_lines")
-    line_total = cursor.fetchone()[0]
+    print(f"Delivered shipments found: {len(delivered_shipments)}")
+    print(f"Total invoices generated: {len(invoices)}")
+    print(f"Total invoice lines generated: {len(invoice_lines)}")
 
     connection.close()
 
-    print(f"Total invoices generated: {invoice_total}")
-    print(f"Total invoice lines generated: {line_total}")
+
 
 def generate_payments():
     rng = random.Random(RANDOM_SEED)
@@ -442,6 +471,7 @@ def generate_payments():
     cursor.execute("""
         SELECT invoice_id, account_id, invoice_date, total_amount
         FROM invoices
+        ORDER BY invoice_id
     """)
 
     invoice_records = cursor.fetchall()
@@ -449,6 +479,7 @@ def generate_payments():
     print(f"Invoices found for payment generation: {len(invoice_records)}")
 
     payments = []
+    payment_number = 1
 
     payment_methods = [
         "Bank Transfer",
@@ -457,44 +488,61 @@ def generate_payments():
         "Cheque"
     ]
 
-    payment_statuses = [
-        "Received",
-        "Pending",
-        "Failed"
-    ]
+    for invoice_index, (invoice_id, account_id, invoice_date, total_amount) in enumerate(invoice_records, start=1):
 
-    for i, invoice in enumerate(invoice_records, start=1):
+        payment_count = 2 if invoice_index <= 7000 else 1
 
-        invoice_id, account_id, invoice_date, total_amount = invoice
+        remaining_amount = total_amount
 
-        payment_id = f"PAY-2026-{i:06d}"
+        for payment_index in range(payment_count):
 
-        payment_date = date.fromisoformat(invoice_date) + timedelta(
-            days=rng.randint(1, 45)
-        )
+            payment_id = f"PAY-2026-{payment_number:06d}"
 
-        payment_status = rng.choice(payment_statuses)
+            payment_date = (
+                date.fromisoformat(invoice_date)
+                + timedelta(days=rng.randint(1, 45))
+            )
 
-        payment_amount = round(
-            total_amount * rng.uniform(0.3, 1.0), 2
-        )
+            payment_status = rng.choices(
+                ["Received", "Pending", "Failed"],
+                weights=[75, 15, 10]
+            )[0]
 
-        payment_method = rng.choice(payment_methods)
+            if payment_index == payment_count - 1:
+                payment_amount = remaining_amount
+            else:
+                payment_amount = round(
+                    remaining_amount * rng.uniform(0.2, 0.6), 2
+                )
 
-        payment_reference = f"REF-2026-{i:06d}"
+            payment_amount = max(0.01, round(payment_amount, 2))
 
-        payments.append((
-            payment_id,
-            account_id,
-            payment_date.isoformat(),
-            payment_amount,
-            payment_method,
-            payment_reference,
-            payment_status,
-            "INR"
-        ))
+            if payment_status != "Received":
+                payment_amount = round(
+                    total_amount * rng.uniform(0.1, 0.5), 2
+                )
+
+            payments.append((
+                payment_id,
+                account_id,
+                payment_date.isoformat(),
+                payment_amount,
+                rng.choice(payment_methods),
+                f"REF-2026-{payment_number:06d}",
+                payment_status,
+                "INR"
+            ))
+
+            if payment_status == "Received":
+                remaining_amount = max(
+                    0,
+                    round(remaining_amount - payment_amount, 2)
+                )
+
+            payment_number += 1
+
     cursor.executemany("""
-        INSERT OR IGNORE INTO payments (
+        INSERT INTO payments (
             payment_id,
             account_id,
             payment_date,
@@ -512,16 +560,17 @@ def generate_payments():
     print(f"Total payments generated: {len(payments)}")
 
     connection.close()
-def generate_payment_allocations():
 
-    rng = random.Random(RANDOM_SEED)
+
+
+def generate_payment_allocations():
 
     connection = sqlite3.connect(DB_PATH)
     connection.execute("PRAGMA foreign_keys = ON")
     cursor = connection.cursor()
 
     cursor.execute("""
-        SELECT payment_id, payment_amount
+        SELECT payment_id, account_id, payment_date, payment_amount
         FROM payments
         WHERE payment_status = 'Received'
         ORDER BY payment_id
@@ -529,44 +578,86 @@ def generate_payment_allocations():
 
     payment_records = cursor.fetchall()
 
+    cursor.execute("""
+        SELECT
+    i.invoice_id,
+    i.account_id,
+    i.invoice_date,
+    i.total_amount,
+    COALESCE(SUM(pa.allocated_amount), 0)
+        FROM invoices i
+        LEFT JOIN payment_allocations pa
+            ON i.invoice_id = pa.invoice_id
+        GROUP BY i.invoice_id
+        ORDER BY i.invoice_id
+    """)
+
+    invoice_records = cursor.fetchall()
+
+    invoice_balances = {}
+
+    for invoice_id, account_id, invoice_date, total_amount, allocated_amount in invoice_records:
+        invoice_balances[invoice_id] = {
+            "account_id": account_id,
+            "invoice_date": invoice_date,
+            "outstanding": max(
+                0,
+                round(total_amount - allocated_amount, 2)
+            )
+        }
+
     print(f"Received payments found: {len(payment_records)}")
 
     allocations = []
+    allocation_number = 1
 
-    for i, payment in enumerate(payment_records, start=1):
+    for payment_id, account_id, payment_date, payment_amount in payment_records:
 
-        payment_id, payment_amount = payment
+        remaining_payment = round(payment_amount, 2)
 
-        cursor.execute("""
-            SELECT invoice_id
-            FROM invoices
-            WHERE invoice_id NOT IN (
-                SELECT invoice_id
-                FROM payment_allocations
+        for invoice_id, invoice_data in invoice_balances.items():
+
+            if remaining_payment <= 0:
+                break
+
+            if invoice_data["account_id"] != account_id:
+                continue
+
+            if invoice_data["invoice_date"] > payment_date:
+                continue
+
+            outstanding = invoice_data["outstanding"]
+
+            if outstanding <= 0:
+                continue
+
+            allocated_amount = round(
+                min(remaining_payment, outstanding), 2
             )
-            ORDER BY invoice_id
-        """)
 
-        invoice_record = cursor.fetchone()
+            if allocated_amount <= 0:
+                continue
 
-        if invoice_record is None:
-            break
+            allocations.append((
+                f"ALLOC-2026-{allocation_number:06d}",
+                payment_id,
+                invoice_id,
+                allocated_amount,
+                payment_date
+            ))
 
-        invoice_id = invoice_record[0]
+            invoice_data["outstanding"] = round(
+                outstanding - allocated_amount, 2
+            )
 
-        allocated_amount = round(payment_amount, 2)
+            remaining_payment = round(
+                remaining_payment - allocated_amount, 2
+            )
 
-        allocation_date = date.today().isoformat()
+            allocation_number += 1
 
-        allocations.append((
-            f"ALLOC-2026-{i:06d}",
-            payment_id,
-            invoice_id,
-            allocated_amount,
-            allocation_date
-        ))
     cursor.executemany("""
-        INSERT OR IGNORE INTO payment_allocations (
+        INSERT INTO payment_allocations (
             allocation_id,
             payment_id,
             invoice_id,
@@ -600,7 +691,9 @@ def generate_disputes():
     invoice_records = cursor.fetchall()
 
     print(f"Invoices found for dispute generation: {len(invoice_records)}")
+
     disputes = []
+    dispute_number = 1
 
     dispute_reasons = [
         "Incorrect invoice amount",
@@ -610,18 +703,16 @@ def generate_disputes():
         "Duplicate invoice"
     ]
 
-    for i, invoice in enumerate(invoice_records, start=1):
+    for invoice_id, account_id, invoice_date, total_amount in invoice_records:
 
-        invoice_id, account_id, invoice_date, total_amount = invoice
-
-        # Only 10% of invoices will have disputes
         if rng.random() > 0.10:
             continue
 
-        dispute_id = f"DSP-2026-{i:06d}"
+        dispute_id = f"DSP-2026-{dispute_number:06d}"
 
-        dispute_date = date.fromisoformat(invoice_date) + timedelta(
-            days=rng.randint(1, 15)
+        dispute_date = (
+            date.fromisoformat(invoice_date)
+            + timedelta(days=rng.randint(1, 15))
         )
 
         dispute_reason = rng.choice(dispute_reasons)
@@ -653,8 +744,11 @@ def generate_disputes():
             dispute_status,
             resolution_date
         ))
+
+        dispute_number += 1
+
     cursor.executemany("""
-        INSERT OR IGNORE INTO disputes (
+        INSERT INTO disputes (
             dispute_id,
             invoice_id,
             account_id,
@@ -673,67 +767,68 @@ def generate_disputes():
 
     connection.close()
 
+
+
 def generate_status_events():
 
     connection = sqlite3.connect(DB_PATH)
+    connection.execute("PRAGMA foreign_keys = ON")
     cursor = connection.cursor()
 
     events = []
+    event_number = 1
 
     print("\nGenerating status events...")
+
+    def add_event(entity_type, entity_id, previous_status,
+                  new_status, event_date, description):
+
+        nonlocal event_number
+
+        events.append((
+            f"EVT-2026-{event_number:06d}",
+            entity_type,
+            entity_id,
+            previous_status,
+            new_status,
+            event_date,
+            description
+        ))
+
+        event_number += 1
+
+    # 1. Quote events
+
     cursor.execute("""
         SELECT quote_id, quote_date, quote_status
         FROM quotes
         ORDER BY quote_id
     """)
 
-    quote_records = cursor.fetchall()
-
-    event_number = 1
-
-    for quote in quote_records:
-
-        quote_id, quote_date, quote_status = quote
+    for quote_id, quote_date, final_status in cursor.fetchall():
 
         event_date = date.fromisoformat(quote_date)
 
-        # First transition: Draft to Sent
-        events.append((
-            f"EVT-2026-{event_number:06d}",
-            "Quote",
-            quote_id,
-            "Draft",
-            "Sent",
-            event_date.isoformat(),
-            "Quote sent to customer"
-        ))
+        add_event(
+            "Quote", quote_id, "Draft", "Sent",
+            event_date.isoformat(), "Quote sent to customer"
+        )
 
-        event_number += 1
+        if final_status != "Sent":
 
-        # Second transition based on final quote status
-        if quote_status != "Sent":
-
-            events.append((
-                f"EVT-2026-{event_number:06d}",
-                "Quote",
-                quote_id,
-                "Sent",
-                quote_status,
+            add_event(
+                "Quote", quote_id, "Sent", final_status,
                 (event_date + timedelta(days=1)).isoformat(),
-                f"Quote status changed to {quote_status}"
-            ))
+                f"Quote status changed to {final_status}"
+            )
 
-            event_number += 1
-
-    print(f"Quote status events prepared: {len(events)}")
+    # 2. Sales order events
 
     cursor.execute("""
         SELECT order_id, order_date, order_status
         FROM sales_orders
         ORDER BY order_id
     """)
-
-    order_records = cursor.fetchall()
 
     order_status_flow = [
         "Confirmed",
@@ -742,37 +837,119 @@ def generate_status_events():
         "Completed"
     ]
 
-    for order in order_records:
+    for order_id, order_date, final_status in cursor.fetchall():
 
-        order_id, order_date, final_status = order
-
-        order_date = date.fromisoformat(order_date)
+        event_date = date.fromisoformat(order_date)
+        previous_status = "Created"
 
         final_index = order_status_flow.index(final_status)
 
-        previous_status = "Created"
+        for index in range(final_index + 1):
 
-        for j in range(final_index + 1):
+            new_status = order_status_flow[index]
 
-            new_status = order_status_flow[j]
-
-            events.append((
-                f"EVT-2026-{event_number:06d}",
+            add_event(
                 "SalesOrder",
                 order_id,
                 previous_status,
                 new_status,
-                (order_date + timedelta(days=j)).isoformat(),
+                (event_date + timedelta(days=index)).isoformat(),
                 f"Order status changed to {new_status}"
-            ))
+            )
 
-            event_number += 1
             previous_status = new_status
 
-    print(f"Total status events prepared: {len(events)}")
+    # 3. Shipment events
+
+    cursor.execute("""
+        SELECT shipment_id, shipment_date,
+               delivery_date, shipment_status
+        FROM shipments
+        ORDER BY shipment_id
+    """)
+
+    for shipment_id, shipment_date, delivery_date, final_status in cursor.fetchall():
+
+        shipment_date = date.fromisoformat(shipment_date)
+
+        add_event(
+            "Shipment", shipment_id, "Created", "Shipped",
+            shipment_date.isoformat(), "Shipment dispatched"
+        )
+
+        if final_status in ("In Transit", "Delivered"):
+
+            transit_date = shipment_date + timedelta(days=1)
+
+            add_event(
+                "Shipment", shipment_id, "Shipped", "In Transit",
+                transit_date.isoformat(), "Shipment in transit"
+            )
+
+        if final_status == "Delivered":
+
+            add_event(
+                "Shipment", shipment_id, "In Transit", "Delivered",
+                delivery_date, "Shipment delivered"
+            )
+
+    # 4. Invoice events
+
+    cursor.execute("""
+        SELECT invoice_id, invoice_date, invoice_status
+        FROM invoices
+        ORDER BY invoice_id
+    """)
+
+    for invoice_id, invoice_date, invoice_status in cursor.fetchall():
+
+        add_event(
+            "Invoice", invoice_id, "Draft", invoice_status,
+            invoice_date, f"Invoice status changed to {invoice_status}"
+        )
+
+    # 5. Payment events
+
+    cursor.execute("""
+        SELECT payment_id, payment_date, payment_status
+        FROM payments
+        ORDER BY payment_id
+    """)
+
+    for payment_id, payment_date, payment_status in cursor.fetchall():
+
+        add_event(
+            "Payment", payment_id, "Initiated", payment_status,
+            payment_date, f"Payment status changed to {payment_status}"
+        )
+
+    # 6. Dispute events
+
+    cursor.execute("""
+        SELECT dispute_id, dispute_date,
+               resolution_date, dispute_status
+        FROM disputes
+        ORDER BY dispute_id
+    """)
+
+    for dispute_id, dispute_date, resolution_date, dispute_status in cursor.fetchall():
+
+        add_event(
+            "Dispute", dispute_id, "None", "Open",
+            dispute_date, "Dispute raised"
+        )
+
+        if dispute_status != "Open":
+
+            status_date = resolution_date if dispute_status == "Resolved" else dispute_date
+
+            add_event(
+                "Dispute", dispute_id, "Open", dispute_status,
+                status_date, f"Dispute status changed to {dispute_status}"
+            )
 
     cursor.executemany("""
-        INSERT OR IGNORE INTO status_events (
+        INSERT INTO status_events (
             event_id,
             entity_type,
             entity_id,
@@ -787,6 +964,18 @@ def generate_status_events():
     connection.commit()
 
     print(f"Total status events generated: {len(events)}")
+
+    cursor.execute("""
+        SELECT entity_type, COUNT(*)
+        FROM status_events
+        GROUP BY entity_type
+        ORDER BY entity_type
+    """)
+
+    print("\nEvents by entity:")
+
+    for entity_type, count in cursor.fetchall():
+        print(f"{entity_type}: {count}")
 
     connection.close()
 

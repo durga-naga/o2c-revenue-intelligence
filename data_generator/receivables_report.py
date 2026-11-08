@@ -4,11 +4,11 @@ import csv
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "o2c_database.db"
+DB_PATH = BASE_DIR / "o2c_test_v2.db"
 OUTPUT_PATH = BASE_DIR / "exports" / "receivables_report.csv"
 
 # Deliberately omit this dispute from the receivables report.
-ANOMALY_DISPUTE_ID = "DSP-2026-000004"
+ANOMALY_DISPUTE_ID = "DSP-2026-000001"
 
 
 def generate_receivables_report():
