@@ -58,23 +58,21 @@ Five deterministic anomalies are included:
 4. Invalid Lifecycle Transition: An order has an invalid status transition.
 5. Missing Dispute Reconciliation: An active dispute is missing from the receivables report.
 
-Expected anomaly records are available in exports/ground_truth.csv.
+Expected anomaly records are available in `exports/ground_truth.csv`.
 
 ## Dataset
 
-| Entity | Records |
-|---|---:|
-| Accounts | 500 |
-| Quotes | 10,000 |
-| Sales Orders | 7,000 |
-| Shipments | 3,454 |
-| Invoices | 1,145 |
-| Payments | 1,145 |
-| Payment Allocations | 388 |
-| Disputes | 125 |
-| Status Events | 36,451 |
+- Accounts: 500
+- Quotes: 10,000
+- Sales Orders: 7,000
+- Shipments: 9,000
+- Invoices: 8,000
+- Payments: 15,000
+- Payment Allocations: 13,900
+- Disputes: 806
+- Status Events: 86,302
 
-The dataset is synthetic and uses a fixed random seed.
+The dataset is synthetic and generated using a fixed random seed for reproducibility. It includes five deterministic anomalies for validation.
 
 ## Installation and Setup
 
@@ -103,6 +101,20 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+### Generate the Database and Dataset
+
+Run the following commands in order:
+
+```bash
+python database/create_test_database.py
+python data_generator/generator.py
+python data_generator/anomaly_injector.py
+python data_generator/ground_truth.py
+python data_generator/receivables_report.py
+```
+
+These commands create the database, generate synthetic transaction data, inject anomalies and generate validation reports.
+
 ## Run the Dashboard
 
 ```bash
@@ -127,15 +139,14 @@ The current test suite contains 8 tests covering database integrity, foreign key
 
 The exports folder contains:
 
-- o2c_database.sql
-- o2c_database.json
-- receivables_report.csv
-- ground_truth.csv
+- `receivables_report.csv`
+- `ground_truth.csv`
+- `o2c_database.sql`
+- `o2c_database.json`
 
 ## Assumptions and Limitations
 
 - The application uses synthetic transaction data.
-- The current dataset contains 1,145 invoices and 1,145 payments.
 - The receivables report is generated separately.
 - The five injected anomalies are deterministic.
 - This is a demonstration project, not a production financial system.
@@ -146,8 +157,8 @@ AI assistance was used for code guidance, debugging, documentation support and t
 
 ## Future Improvements
 
-- Expand transaction volumes.
-- Improve receivables calculations.
 - Add more financial validation rules.
+- Improve receivables calculations.
 - Enhance dashboard filtering.
 - Add automated data quality monitoring.
+- Introduce additional anomaly scenarios.
