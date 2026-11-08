@@ -222,23 +222,17 @@ elif page == "Exception Monitoring":
 
     show_table("""
         SELECT
-            il.invoice_id,
             il.order_line_id,
-            il.quantity AS invoiced_quantity,
-            COALESCE(SUM(sl.shipped_quantity), 0) AS delivered_quantity
+            GROUP_CONCAT(DISTINCT il.invoice_id) AS invoice_ids,
+            SUM(il.quantity) AS invoiced_quantity,
+            (
+                SELECT COALESCE(SUM(sl.shipped_quantity), 0)
+                FROM shipment_lines sl
+                WHERE sl.order_line_id = il.order_line_id
+            ) AS fulfilled_quantity
         FROM invoice_lines il
-        JOIN shipments sh
-            ON sh.order_id = (
-                SELECT order_id
-                FROM order_lines
-                WHERE order_line_id = il.order_line_id
-            )
-            AND sh.shipment_status = 'Delivered'
-        JOIN shipment_lines sl
-            ON sl.shipment_id = sh.shipment_id
-            AND sl.order_line_id = il.order_line_id
-        GROUP BY il.invoice_line_id
-        HAVING invoiced_quantity > delivered_quantity
+        GROUP BY il.order_line_id
+        HAVING invoiced_quantity > fulfilled_quantity
     """)
 
     st.subheader("Duplicate Payment Allocations")
