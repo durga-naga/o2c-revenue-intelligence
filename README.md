@@ -41,6 +41,9 @@ The database contains 13 relational tables:
 12. Disputes
 13. Status Events
 
+Detailed field definitions, data types, required and optional fields, allowed values, relationships, and validation rules are documented in [DATA_DICTIONARY.md](DATA_DICTIONARY.md).
+
+
 ## Dashboard Features
 
 - Overview
